@@ -12,6 +12,7 @@
 
 #define SEM_WRITE 0 // 用于控制writer是否可以写入book
 
+
 union semun
 {
     int val;

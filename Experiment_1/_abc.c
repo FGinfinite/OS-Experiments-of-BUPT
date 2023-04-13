@@ -37,7 +37,6 @@ int main()
     for (size_t i = 0; i < 10; ++i)
     {
         printf("a");
-        // printf("I am parent process\n");
         fflush(stdout);
         sleep(1);
     }

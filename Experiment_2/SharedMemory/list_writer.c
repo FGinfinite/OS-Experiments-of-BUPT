@@ -26,6 +26,7 @@ typedef struct node
     int nextid;
 } node;
 
+
 int main()
 {
     key_t a = ftok(".", PJT_ID);

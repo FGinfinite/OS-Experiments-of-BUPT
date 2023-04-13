@@ -33,8 +33,7 @@ int main()
         {
             for (size_t i = 0; i < 10; ++i)
             {
-                while (status[2] != true)
-                    ;
+                while (status[2] != true);
                 printf("c\n");
                 fflush(stdout);
                 status[2] = false;

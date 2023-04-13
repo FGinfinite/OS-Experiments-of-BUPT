@@ -14,6 +14,7 @@ struct message {
     pid_t sender;   // 发送者的进程标识
 };
 
+
 int main() {
     int msgqid;
     struct message msg;

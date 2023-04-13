@@ -34,6 +34,7 @@ typedef struct
 
 struct sockaddr_in serv_add, cli_add;
 
+
 int main(int argc, char **argv)
 {
     int sockfd; // 分别代表监听套接字和已连接套接字

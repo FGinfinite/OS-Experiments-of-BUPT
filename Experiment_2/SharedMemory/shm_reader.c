@@ -46,6 +46,7 @@ int main()
         exit(EXIT_FAILURE);
     }
 
+
     while (strcmp(book, "END") != 0)
     {
         printf("Trying to understand the book ...\n");

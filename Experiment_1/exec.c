@@ -8,7 +8,6 @@
 int main() {
     pid_t pid;
     int status;
-
     pid = fork(); // 创建子进程
 
     if (pid == -1) { 

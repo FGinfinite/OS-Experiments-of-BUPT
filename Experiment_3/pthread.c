@@ -6,6 +6,7 @@
 
 #define BUFFER_SIZE 10
 
+
 typedef struct
 {
     int data[BUFFER_SIZE];   // 缓冲区数组

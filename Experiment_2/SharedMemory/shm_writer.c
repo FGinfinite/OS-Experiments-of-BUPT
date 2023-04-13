@@ -81,6 +81,7 @@ int main()
             perror("semop");
             exit(1);
         }
+        
         printf("You can rewrite the book now.\n");
         fgets(buff, SHM_SIZE, stdin);
         fflush(stdin);
