@@ -1,0 +1,12 @@
+{
+    "files.associations": {
+        "stdio.h": "c",
+        "ipc.h": "c",
+        "types.h": "c",
+        "errno.h": "c",
+        "pthread.h": "c",
+        "unistd.h": "c",
+        "time.h": "c",
+        "semaphore.h": "c"
+    }
+}
