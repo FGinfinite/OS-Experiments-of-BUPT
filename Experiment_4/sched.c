@@ -3,40 +3,53 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#define timeSlice 10
 
 void printSentence(void *arg, int *ticks, ProcessState *flag)
 {
+    Process *p = ss->running;
     char *sentence = (char *)arg;
     int i;
     // 如果是初次运行则先申请空间以便保存上下文
-    if (ss->running->context.data == NULL)
+    if (p->context.data == NULL)
     {
         // 申请空间，0为i
-        ss->running->context.data = (void *)malloc(sizeof(int));
+        p->context.data = (void *)malloc(sizeof(int));
         i = 0;
     }
     else
     {
         // 如果不是初次运行则恢复上下文
-        i = *(int *)(ss->running->context.data);
+        i = *(int *)(p->context.data);
     }
-    switch (ss->running->context.pc)
+
+    switch (p->context.pc)
     {
     case 0:
         while (sentence[i] != '\0')
         {
-            printf("%c", sentence[i]);
+            printf("PRINT: %c\n", sentence[i]);
             i++;
             (*ticks)++; // 记录CPU消耗
-            needSchedule(ss);
+            totalTicks++;
+            if ((*flag = needSchedule(ss)) == TASK_READY)
+            {
+                // 保存上下文
+                *(int *)(p->context.data) = i;
+                return;
+            }
         }
-        ss->running->context.pc++;
+        p->context.pc++;
     case 1:
-        printf("\n");
+        printf("PRINT: Finished printing sentence.\n");
         (*ticks)++;
-        ss->running->context.pc++;
-        needSchedule(ss);
+        p->context.pc++;
+        totalTicks++;
+        if ((*flag = needSchedule(ss)) == TASK_READY)
+        {
+            // 保存上下文
+            *(int *)(p->context.data) = i;
+            return;
+        }
     case 2:
         break;
     }
@@ -45,45 +58,59 @@ void printSentence(void *arg, int *ticks, ProcessState *flag)
 
 void sum(void *arg, int *ticks, ProcessState *flag)
 {
+    Process *p = ss->running;
     int total, i;
     // 如果是初次运行则先申请空间以便保存上下文
-    if (ss->running->context.data == NULL)
+    if (p->context.data == NULL)
     {
         // 申请空间，0为total，1为i
-        ss->running->context.data = (void *)malloc(sizeof(int) * 2);
+        p->context.data = (void *)malloc(sizeof(int) * 2);
         total = 0;
         i = 0;
     }
     else
     {
         // 如果不是初次运行则恢复上下文
-        int *data = (int *)(ss->running->context.data);
+        int *data = (int *)(p->context.data);
         total = data[0];
         i = data[1];
     }
 
     int n = *(int *)arg;
 
-    switch (ss->running->context.pc)
+    switch (p->context.pc)
     {
     case 0:
         while (i <= n)
         {
             total += i;
             ++i;
-            printf("sum = %d\n", total);
+            printf("SUM: sum = %d\n", total);
 
             (*ticks)++; // 记录CPU消耗
             totalTicks++;
-            needSchedule(ss);
+            if ((*flag = needSchedule(ss)) == TASK_READY)
+            {
+                // 保存上下文
+                ((int *)p->context.data)[0] = total;
+                ((int *)p->context.data)[1] = i;
+                return;
+            }
         }
-        ss->running->context.pc++;
+        p->context.pc++;
     case 1:
-        printf("sum = %d\n", total);
+        printf("SUM: total sum = %d\n", total);
+
         (*ticks)++;
         totalTicks++;
-        ss->running->context.pc++;
-        needSchedule(ss);
+        p->context.pc++;
+        if ((*flag = needSchedule(ss)) == TASK_READY)
+        {
+            // 保存上下文
+            ((int *)p->context.data)[0] = total;
+            ((int *)p->context.data)[1] = i;
+            return;
+        }
     case 2:
         break;
     }
@@ -96,7 +123,7 @@ void halt(void *arg, int *ticks, ProcessState *flag)
     usleep(100);
     // printf("halt\n");
     totalTicks++;
-    (*ticks)++; // Todo: 记录CPU消耗
+    (*ticks)++;
 }
 
 void initProcess(Process *p)
@@ -112,6 +139,7 @@ void initProcess(Process *p)
     p->vruntime = 0;
     p->runtime = 0;
     p->prevTime = 0;
+    p->level = 0;
 }
 
 ProcessState runProcess(Process *p)
@@ -137,12 +165,16 @@ void runCurrentTask(Scheduler *s)
     // 如果是自然结束，那么就还需要再显式地调度一次
     if (s->running->task.fun == halt || (s->running->state) == TASK_EXITED)
     {
+        if (s->running->task.fun != halt)
+            printf("Process %d exited at ticks %d and schedule.\n", s->running->id, totalTicks);
         schedule(s);
     }
 }
 
 void initScheduler(Scheduler *s)
 {
+    s->timeSlice = DEFALT_TIME_SLICE;
+
     s->policy = SCHED_FCFS;
     s->running = NULL;
     s->readyQueues = (MultiQueue *)malloc(sizeof(MultiQueue));
@@ -211,6 +243,7 @@ void multiQueueAddQueue(MultiQueue *mq)
 void schedule(Scheduler *sched)
 {
     sem_wait(&semReadyQueue);
+    sched->running->ticks = 0; // 重置时间片
     switch (sched->policy)
     {
     case SCHED_FCFS:
@@ -221,13 +254,44 @@ void schedule(Scheduler *sched)
             sched->running = queueFront(sched->readyQueues->queue[0]);
             queuePop(sched->readyQueues->queue[0]);
         }
-        // 似乎不应该在FCFS中有以下else过程，因为FCFS的调度只会发生在进程结束时(?)
         else
         {
             sched->running->state = TASK_READY;
             queuePush(sched->readyQueues->queue[0], sched->running);
             sched->running = queueFront(sched->readyQueues->queue[0]);
             queuePop(sched->readyQueues->queue[0]);
+        }
+        break;
+    case SCHED_RR_:
+        if (sched->running && sched->running->state == TASK_EXITED)
+        {
+            recycleProcess(sched->running);
+            sched->running = queueFront(sched->readyQueues->queue[0]);
+            queuePop(sched->readyQueues->queue[0]);
+        }
+        else
+        {
+            sched->running->state = TASK_READY;
+            queuePush(sched->readyQueues->queue[0], sched->running);
+            sched->running = queueFront(sched->readyQueues->queue[0]);
+            queuePop(sched->readyQueues->queue[0]);
+        }
+        break;
+    case SCHED_MLFQ:
+        // 如果当前进程已经结束，则回收进程
+        if (sched->running && sched->running->state == TASK_EXITED)
+        {
+            recycleProcess(sched->running);
+            sched->running = pickFirstProcess(sched->readyQueues);
+            popFirstProcess(sched->readyQueues);
+        }
+        // 如果当前进程还没有结束，那么就将其放回就绪队列
+        else
+        {
+            sched->running->state = TASK_READY;
+            pushProcess(sched->readyQueues, sched->running);
+            sched->running = pickFirstProcess(sched->readyQueues);
+            popFirstProcess(sched->readyQueues);
         }
         break;
 
@@ -237,25 +301,60 @@ void schedule(Scheduler *sched)
     sem_post(&semReadyQueue);
 }
 
-void needSchedule(Scheduler *sched)
+ProcessState needSchedule(Scheduler *sched)
 {
     // 判断是否需要调度
-    printf("needSchedule: ");
     switch (sched->policy)
     {
     case SCHED_FCFS:
         // 如果当前没有进程在运行或者当前进程已经结束，则调度
         if (sched->running->task.fun == halt || sched->running->state == TASK_EXITED)
         {
-            printf("yes\n");
+            printf("needSchedule: FCFS---yes\n");
             schedule(sched);
+            return TASK_READY;
         }
         else
         {
-            printf("no\n");
+            return TASK_RUNNING;
         }
         break;
-
+    case SCHED_RR_:
+        if (sched->running->task.fun == halt || sched->running->state == TASK_EXITED)
+        {
+            printf("needSchedule: RR---yes\n");
+            schedule(sched);
+            return TASK_READY;
+        }
+        else if (sched->running->ticks >= sched->timeSlice)
+        {
+            printf("needSchedule: RR---yes\n");
+            schedule(sched);
+            return TASK_READY;
+        }
+        else
+        {
+            return TASK_RUNNING;
+        }
+        break;
+    case SCHED_MLFQ:
+        if (sched->running->task.fun == halt || sched->running->state == TASK_EXITED)
+        {
+            printf("needSchedule: MLFQ---yes\n");
+            schedule(sched);
+            return TASK_READY;
+        }
+        else if (sched->running->ticks >= sched->MQtimeSlices[sched->running->level])
+        {
+            printf("needSchedule: MLFQ---yes\n");
+            schedule(sched);
+            return TASK_READY;
+        }
+        else
+        {
+            return TASK_RUNNING;
+        }
+        break;
     default:
         break;
     }
@@ -269,12 +368,21 @@ void runningCPU(void *s)
 {
     Scheduler *sched = (Scheduler *)s;
     printf("CPU is running...\n");
+
+    // 初始化调度器
     initScheduler(sched);
-    multiQueueAddQueue(sched->readyQueues);
+    // 初始化多级反馈队列
+    for (int i = 0; i < MAX_QUEUES; i++)
+        multiQueueAddQueue(sched->readyQueues);
+    sched->MQtimeSlices[0] = DEFALT_MQ_TIME_SLICE_1;
+    sched->MQtimeSlices[1] = DEFALT_MQ_TIME_SLICE_2;
+    sched->MQtimeSlices[2] = DEFALT_MQ_TIME_SLICE_3;
+    sched->MQtimeSlices[3] = DEFALT_MQ_TIME_SLICE_4;
+
     addHaltTask(sched); // 将空闲进程运行
     while (1)
     {
-        // CPU只管运行即可，剩下的老爹来想办法
+        // CPU只管运行即可，调度器负责调度
         runCurrentTask(sched);
     }
 }
@@ -285,7 +393,7 @@ void console(void *s)
     printf("Console is running...\n");
     while (1)
     {
-        printf("1.add a task\n2. change policy.\n3.exit\n");
+        printf("1. add a task\n2. change policy.\n3. exit\n");
         int choice;
         scanf("%d", &choice);
         switch (choice)
@@ -294,7 +402,11 @@ void console(void *s)
             addTask(sched);
             break;
         case 2:
-            return;
+            changePolicy(sched);
+            break;
+        case 3:
+            exit(0);
+            break;
         default:
             printf("Invalid input.\n");
             break;
@@ -302,7 +414,7 @@ void console(void *s)
     }
 }
 
-// Todo: 改变调度策略
+// 改变调度策略
 void changePolicy(Scheduler *sched)
 {
     printf("Input policy: 1.FCFS 2.RR 3.MLFQ 4.NORMAL(simulate CFS of Linux)\n");
@@ -321,7 +433,7 @@ void addTask(Scheduler *sched)
         fgets(buffer, 128, stdin);
         // 清除换行符
         buffer[strlen(buffer) - 1] = '\0';
-        if(strlen(buffer) == 0)
+        if (strlen(buffer) == 0)
             continue;
         char *command;
         command = strtok(buffer, " ");
@@ -338,7 +450,7 @@ void addTask(Scheduler *sched)
 
             command = strtok(NULL, " ");
             p->task.arg = (void *)malloc(sizeof(char) * (strlen(command) + 1));
-            strcpy(p->task.arg, buffer);
+            strcpy(p->task.arg, command);
         }
         else if (strcmp(command, "SUM") == 0)
         {
@@ -423,7 +535,7 @@ void jobSchedule(void *s)
                     if (prev != NULL)
                         t = prev->next;
                     else
-                        t=sched->waitQueue->head;
+                        t = sched->waitQueue->head;
                     sched->waitQueue->size--;
                 }
                 else
@@ -439,8 +551,38 @@ void jobSchedule(void *s)
     }
 }
 
+Process *pickFirstProcess(MultiQueue *mq)
+{
+    for (int i = 0; i < mq->size; i++)
+    {
+        if (mq->queue[i]->size != 0)
+        {
+            return queueFront(mq->queue[i]);
+        }
+    }
+    return NULL;
+}
+
+void popFirstProcess(MultiQueue *mq)
+{
+    for (int i = 0; i < mq->size; i++)
+    {
+        if (mq->queue[i]->size != 0)
+        {
+            queuePop(mq->queue[i]);
+            return;
+        }
+    }
+}
+
+void pushProcess(MultiQueue *mq, Process *p)
+{
+    queuePush(mq->queue[p->level == MAX_QUEUES - 1 ? p->level : ++(p->level)], p);
+}
+
 int main()
 {
+    exitFlag = 0;
     sem_init(&semReadyQueue, 0, 1);
     sem_init(&semWaitQueue, 0, 1);
     Scheduler *sched = (Scheduler *)malloc(sizeof(Scheduler));

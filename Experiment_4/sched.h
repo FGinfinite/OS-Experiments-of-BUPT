@@ -2,14 +2,18 @@
 #include <semaphore.h>
 #define DEFALT_PRIO 120
 #define DEFALT_NICE 0
+#define DEFALT_TIME_SLICE 10
+#define DEFALT_MQ_TIME_SLICE_1 2
+#define DEFALT_MQ_TIME_SLICE_2 4
+#define DEFALT_MQ_TIME_SLICE_3 8
+#define DEFALT_MQ_TIME_SLICE_4 16
+#define MAX_QUEUES 4
 typedef enum
 {
     // 任务状态
     TASK_RUNNING,
     TASK_READY,
-    TASK_BLOCKED,
     TASK_EXITED,
-    TASK_WAITING,
     TASK_HANGING,
     TASK_DIED
 } ProcessState;
@@ -57,10 +61,12 @@ typedef struct
     // 被加入CPU就绪队列的时间（方便批量增加进程）
     int pushTIme;
     // CPU消耗
-    int ticks;
+    int ticks;    // 记录当前任务已经运行的时间
     int vruntime; // 虚拟运行时间
     int runtime;  // 运行时间
     int prevTime; // 上次运行时间
+    // 多级队列状态
+    int level;
 } Process;
 
 // 队列节点
@@ -91,14 +97,18 @@ typedef struct
     Process *running;
     MultiQueue *readyQueues;
     // 任务会被首先加入至waitQueue中，到特定时间了才会移入readyQueues
-    Queue* waitQueue;
+    Queue *waitQueue;
     SchedPolicy policy;
+    // 时间片
+    int timeSlice;
+    int MQtimeSlices[4];
 } Scheduler;
 
-sem_t semWaitQueue; // 等待队列必须互斥地操作
+sem_t semWaitQueue;  // 等待队列必须互斥地操作
 sem_t semReadyQueue; // 等待队列必须互斥地操作
-int totalTicks; // 总的时钟滴答数
-Scheduler *ss;  // 调度器
+int totalTicks;      // 总的时钟滴答数
+Scheduler *ss;       // 调度器
+int exitFlag;        // 退出标志
 
 void schedule(Scheduler *sched);
 // 打印句子
@@ -112,14 +122,15 @@ void initProcess(Process *p);
 void runCurrentTask(Scheduler *sched);
 // 运行进程
 ProcessState runProcess(Process *p);
-// 在每条指令之后都判断是否需要调度（类似轮询？）
-void needSchedule(Scheduler *sched);
+// 在每条"指令"之后都判断是否需要调度（类似轮询？）
+ProcessState needSchedule(Scheduler *sched);
 void initScheduler(Scheduler *s);
 void initQueue(Queue *q);
 void initMultiQueue(MultiQueue *mq);
 void queuePush(Queue *q, Process *p);
 Process *queueFront(Queue *q);
 void queuePop(Queue *q);
+// 为多重队列增加一个队列
 void multiQueueAddQueue(MultiQueue *mq);
 /*模拟CPU的线程。
 1.如果没有任务，则应该运行halt，模拟系统空闲进程
@@ -137,3 +148,9 @@ void changePolicy(Scheduler *sched);
 void recycleProcess(Process *p);
 // 对主调度器进行作业调度的线程
 void jobSchedule(void *s);
+// 挑选多重队列中的第一个进程
+Process *pickFirstProcess(MultiQueue *mq);
+// 弹出多重队列中的第一个进程
+void popFirstProcess(MultiQueue *mq);
+// 将进程加入多重队列
+void pushProcess(MultiQueue *mq, Process *p);
