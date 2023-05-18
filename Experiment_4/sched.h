@@ -8,6 +8,7 @@
 #define DEFALT_MQ_TIME_SLICE_3 8
 #define DEFALT_MQ_TIME_SLICE_4 16
 #define MAX_QUEUES 4
+
 typedef enum
 {
     // 任务状态
@@ -24,9 +25,20 @@ typedef enum
     SCHED_FCFS,
     SCHED_RR_,
     SCHED_MLFQ,
-    SCHED_NORMAL
-
 } SchedPolicy;
+
+typedef struct bigintnode
+{
+    int data;
+    struct bigintnode *prev;
+    struct bigintnode *next;
+} BigIntNode;
+
+// 使用双向链表存储大整数，个位数在前
+typedef struct bigint
+{
+    BigIntNode *head;
+} BigInt;
 
 // 任务
 typedef struct
@@ -108,15 +120,18 @@ sem_t semWaitQueue;  // 等待队列必须互斥地操作
 sem_t semReadyQueue; // 等待队列必须互斥地操作
 int totalTicks;      // 总的时钟滴答数
 Scheduler *ss;       // 调度器
-int exitFlag;        // 退出标志
 
+// 根据当前调度策略，调度进程
 void schedule(Scheduler *sched);
 // 打印句子
 void printSentence(void *arg, int *ticks, ProcessState *flag);
 // 计算1～n的和
 void sum(void *arg, int *ticks, ProcessState *flag);
+// 计算1～n的阶乘
+void factorial(void *arg, int *ticks, ProcessState *flag);
 // 空闲进程
-void halt(void *arg, int *ticks, ProcessState *flag);
+void idle(void *arg, int *ticks, ProcessState *flag);
+// 初始化进程
 void initProcess(Process *p);
 // 运行调度器的当前任务
 void runCurrentTask(Scheduler *sched);
@@ -124,10 +139,15 @@ void runCurrentTask(Scheduler *sched);
 ProcessState runProcess(Process *p);
 // 在每条"指令"之后都判断是否需要调度（类似轮询？）
 ProcessState needSchedule(Scheduler *sched);
+// 初始化调度器
 void initScheduler(Scheduler *s);
+// 初始化队列
 void initQueue(Queue *q);
+// 初始化多重队列
 void initMultiQueue(MultiQueue *mq);
+// 将进程加入队列
 void queuePush(Queue *q, Process *p);
+// 获取队列头部的进程
 Process *queueFront(Queue *q);
 void queuePop(Queue *q);
 // 为多重队列增加一个队列
@@ -152,5 +172,5 @@ void jobSchedule(void *s);
 Process *pickFirstProcess(MultiQueue *mq);
 // 弹出多重队列中的第一个进程
 void popFirstProcess(MultiQueue *mq);
-// 将进程加入多重队列
-void pushProcess(MultiQueue *mq, Process *p);
+// 设置Bigint的值
+void setBigInt(BigInt *bi, int value);

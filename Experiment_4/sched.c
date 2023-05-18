@@ -118,10 +118,162 @@ void sum(void *arg, int *ticks, ProcessState *flag)
     (*flag) = TASK_EXITED;
 }
 
-void halt(void *arg, int *ticks, ProcessState *flag)
+void setBigInt(BigInt *bi, int value)
+{
+    bi->head = (BigIntNode *)malloc(sizeof(BigIntNode));
+    BigIntNode *node = bi->head;
+    BigIntNode *prev = node;
+    node->data = value % 10;
+    value /= 10;
+    node->next = NULL;
+    node->prev = NULL;
+    while (value)
+    {
+        node = (BigIntNode *)malloc(sizeof(BigIntNode));
+        node->data = value % 10;
+        value /= 10;
+        node->next = NULL;
+        prev->next = node;
+        node->prev = prev;
+        prev = node;
+    }
+}
+
+void factorial(void *arg, int *ticks, ProcessState *flag)
+{
+
+    Process *p = ss->running;
+    BigInt total;
+    int count;
+    int carry;
+    BigIntNode *node;
+    BigIntNode *prev;
+    // 如果是初次运行则先申请空间以便保存上下文
+    if (p->context.data == NULL)
+    {
+        // 申请空间
+        p->context.data = (void *)malloc(sizeof(int) * 2 + sizeof(BigIntNode *) * 2 + sizeof(BigInt));
+        setBigInt(&total, 1);
+        count = 1;
+        carry = 0;
+        node = total.head;
+        prev = NULL;
+    }
+    else
+    {
+        // 如果不是初次运行则恢复上下文
+        count = *(int *)(p->context.data);
+        carry = *((int *)(p->context.data) + sizeof(int));
+        node = *((BigIntNode **)(p->context.data) + sizeof(int) * 2);
+        prev = *((BigIntNode **)(p->context.data) + sizeof(int) * 2 + sizeof(BigIntNode *));
+        total = *((BigInt *)(p->context.data) + sizeof(int) * 2 + sizeof(BigIntNode *) * 2);
+    }
+
+    int n = *(int *)arg;
+
+    switch (p->context.pc < 2)
+    {
+    case 1:
+        while (count <= n)
+        {
+            printf("FACTORIAL: count = %d\n", count);
+            node = total.head;
+            prev = NULL;
+            switch (p->context.pc)
+            {
+            // total与count相乘
+            case 0:
+                while (node)
+                {
+                    int temp = node->data * count + carry;
+                    node->data = temp % 10;
+                    carry = temp / 10;
+                    prev = node;
+                    node = node->next;
+                }
+
+                p->context.pc++;
+                (*ticks)++;
+                totalTicks++;
+                if ((*flag = needSchedule(ss)) == TASK_READY)
+                {
+                    // 保存上下文
+                    *(int *)(p->context.data) = count;
+                    *((int *)(p->context.data) + sizeof(int)) = carry;
+                    *((BigIntNode **)(p->context.data) + sizeof(int) * 2) = node;
+                    *((BigIntNode **)(p->context.data) + sizeof(int) * 2 + sizeof(BigIntNode *)) = prev;
+                    *((BigInt *)(p->context.data) + sizeof(int) * 2 + sizeof(BigIntNode *) * 2) = total;
+                    return;
+                }
+
+            case 1:
+                // 如果有进位则依次加到最后
+                while (carry)
+                {
+                    node = (BigIntNode *)malloc(sizeof(BigIntNode));
+                    node->data = carry % 10;
+                    carry /= 10;
+                    node->next = NULL;
+                    node->prev = prev;
+                    prev->next = node;
+                    prev = node;
+                }
+                printf("FACTORIAL: Finished count = %d\n", count);
+                count++;
+
+                (*ticks)++;
+                totalTicks++;
+                p->context.pc--;
+                if ((*flag = needSchedule(ss)) == TASK_READY)
+                {
+                    // 保存上下文
+                    *(int *)(p->context.data) = count;
+                    *((int *)(p->context.data) + sizeof(int)) = carry;
+                    *((BigIntNode **)(p->context.data) + sizeof(int) * 2) = node;
+                    *((BigIntNode **)(p->context.data) + sizeof(int) * 2 + sizeof(BigIntNode *)) = prev;
+                    *((BigInt *)(p->context.data) + sizeof(int) * 2 + sizeof(BigIntNode *) * 2) = total;
+                    return;
+                }
+            }
+        }
+        p->context.pc = 2;
+    case 0:
+        switch (p->context.pc)
+        {
+        case 2:
+            // 从prev开始向前逐个打印
+            printf("FACTORIAL: total = ");
+            while (prev)
+            {
+                printf("%d", prev->data);
+                prev = prev->prev;
+            }
+            printf("\n");
+
+            (*ticks)++;
+            totalTicks++;
+            p->context.pc++;
+            if ((*flag = needSchedule(ss)) == TASK_READY)
+            {
+                // 保存上下文
+                *(int *)(p->context.data) = count;
+                *((int *)(p->context.data) + sizeof(int)) = carry;
+                *((BigIntNode **)(p->context.data) + sizeof(int) * 2) = node;
+                *((BigIntNode **)(p->context.data) + sizeof(int) * 2 + sizeof(BigIntNode *)) = prev;
+                *((BigInt *)(p->context.data) + sizeof(int) * 2 + sizeof(BigIntNode *) * 2) = total;
+                return;
+            }
+        case 3:
+            break;
+        }
+    }
+    (*flag) = TASK_EXITED;
+}
+
+void idle(void *arg, int *ticks, ProcessState *flag)
 {
     usleep(100);
-    // printf("halt\n");
+    // printf("idle\n");
     totalTicks++;
     (*ticks)++;
 }
@@ -163,9 +315,9 @@ void runCurrentTask(Scheduler *s)
         return;
     ProcessState flag = runProcess(s->running);
     // 如果是自然结束，那么就还需要再显式地调度一次
-    if (s->running->task.fun == halt || (s->running->state) == TASK_EXITED)
+    if (s->running->task.fun == idle || (s->running->state) == TASK_EXITED)
     {
-        if (s->running->task.fun != halt)
+        if (s->running->task.fun != idle)
             printf("Process %d exited at ticks %d and schedule.\n", s->running->id, totalTicks);
         schedule(s);
     }
@@ -289,7 +441,7 @@ void schedule(Scheduler *sched)
         else
         {
             sched->running->state = TASK_READY;
-            pushProcess(sched->readyQueues, sched->running);
+            queuePush(sched->readyQueues->queue[sched->running->level == MAX_QUEUES - 1 ? sched->running->level : ++(sched->running->level)], sched->running);
             sched->running = pickFirstProcess(sched->readyQueues);
             popFirstProcess(sched->readyQueues);
         }
@@ -308,7 +460,7 @@ ProcessState needSchedule(Scheduler *sched)
     {
     case SCHED_FCFS:
         // 如果当前没有进程在运行或者当前进程已经结束，则调度
-        if (sched->running->task.fun == halt || sched->running->state == TASK_EXITED)
+        if (sched->running->task.fun == idle || sched->running->state == TASK_EXITED)
         {
             printf("needSchedule: FCFS---yes\n");
             schedule(sched);
@@ -320,7 +472,7 @@ ProcessState needSchedule(Scheduler *sched)
         }
         break;
     case SCHED_RR_:
-        if (sched->running->task.fun == halt || sched->running->state == TASK_EXITED)
+        if (sched->running->task.fun == idle || sched->running->state == TASK_EXITED)
         {
             printf("needSchedule: RR---yes\n");
             schedule(sched);
@@ -338,13 +490,7 @@ ProcessState needSchedule(Scheduler *sched)
         }
         break;
     case SCHED_MLFQ:
-        if (sched->running->task.fun == halt || sched->running->state == TASK_EXITED)
-        {
-            printf("needSchedule: MLFQ---yes\n");
-            schedule(sched);
-            return TASK_READY;
-        }
-        else if (sched->running->ticks >= sched->MQtimeSlices[sched->running->level])
+        if (sched->running->task.fun == idle || sched->running->state == TASK_EXITED || sched->running->ticks >= sched->MQtimeSlices[sched->running->level])
         {
             printf("needSchedule: MLFQ---yes\n");
             schedule(sched);
@@ -417,7 +563,7 @@ void console(void *s)
 // 改变调度策略
 void changePolicy(Scheduler *sched)
 {
-    printf("Input policy: 1.FCFS 2.RR 3.MLFQ 4.NORMAL(simulate CFS of Linux)\n");
+    printf("Input policy: 1.FCFS 2.RR 3.MLFQ\n");
     int policy;
     scanf("%d", &policy);
     sched->policy = policy - 1;
@@ -425,7 +571,7 @@ void changePolicy(Scheduler *sched)
 
 void addTask(Scheduler *sched)
 {
-    printf("addTask: Input your command.\nSUM t n: calculate the sum from 1 to n at time t.\nPRINT t sentence: print a sentence word by word at time t.\nEND: end the input.\n");
+    printf("addTask: Input your command.\nSUM t n: calculate the sum from 1 to n at time t.\nPRINT t sentence: print a sentence word by word at time t.\nFACTORIAL t n: calculate the factorial of n at time t.\nEND: end the input.\n");
     while (1)
     {
         char buffer[128];
@@ -464,6 +610,18 @@ void addTask(Scheduler *sched)
             *n = atoi(command);
             p->task.arg = (void *)n;
         }
+        else if (strcmp(command, "FACTORIAL") == 0)
+        {
+            command = strtok(NULL, " ");
+            p->pushTIme = atoi(command);
+
+            p->task.fun = factorial;
+
+            command = strtok(NULL, " ");
+            int *n = (int *)malloc(sizeof(int));
+            *n = atoi(command);
+            p->task.arg = (void *)n;
+        }
         else if (strcmp(command, "END") == 0)
         {
             free(p);
@@ -488,7 +646,7 @@ void addHaltTask(Scheduler *sched)
     p->prio = 0;
     p->nice = 0;
     p->state = TASK_READY;
-    p->task.fun = halt;
+    p->task.fun = idle;
     p->task.arg = NULL;
     p->ticks = 0;
     p->vruntime = 0;
@@ -575,14 +733,8 @@ void popFirstProcess(MultiQueue *mq)
     }
 }
 
-void pushProcess(MultiQueue *mq, Process *p)
-{
-    queuePush(mq->queue[p->level == MAX_QUEUES - 1 ? p->level : ++(p->level)], p);
-}
-
 int main()
 {
-    exitFlag = 0;
     sem_init(&semReadyQueue, 0, 1);
     sem_init(&semWaitQueue, 0, 1);
     Scheduler *sched = (Scheduler *)malloc(sizeof(Scheduler));
