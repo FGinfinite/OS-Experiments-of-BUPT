@@ -73,10 +73,7 @@ typedef struct
     // 被加入CPU就绪队列的时间（方便批量增加进程）
     int pushTIme;
     // CPU消耗
-    int ticks;    // 记录当前任务已经运行的时间
-    int vruntime; // 虚拟运行时间
-    int runtime;  // 运行时间
-    int prevTime; // 上次运行时间
+    int ticks; // 记录当前任务已经运行的时间
     // 多级队列状态
     int level;
 } Process;

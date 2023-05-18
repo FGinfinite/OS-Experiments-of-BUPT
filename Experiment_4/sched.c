@@ -288,9 +288,6 @@ void initProcess(Process *p)
     p->nice = DEFALT_NICE;
     p->state = TASK_READY;
     p->ticks = 0;
-    p->vruntime = 0;
-    p->runtime = 0;
-    p->prevTime = 0;
     p->level = 0;
 }
 
@@ -649,9 +646,6 @@ void addHaltTask(Scheduler *sched)
     p->task.fun = idle;
     p->task.arg = NULL;
     p->ticks = 0;
-    p->vruntime = 0;
-    p->runtime = 0;
-    p->prevTime = 0;
     sched->running = p;
 }
 
