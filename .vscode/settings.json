@@ -9,6 +9,23 @@
         "time.h": "c",
         "semaphore.h": "c",
         "exception": "c",
-        "typeinfo": "c"
+        "typeinfo": "c",
+        "array": "c",
+        "bitset": "c",
+        "string_view": "c",
+        "initializer_list": "c",
+        "ranges": "c",
+        "span": "c",
+        "regex": "c",
+        "utility": "c",
+        "valarray": "c",
+        "*.tcc": "c",
+        "memory": "c",
+        "memory_resource": "c",
+        "fstream": "c",
+        "iosfwd": "c",
+        "new": "c",
+        "sstream": "c",
+        "stop_token": "c"
     }
 }
