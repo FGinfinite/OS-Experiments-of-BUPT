@@ -6,7 +6,7 @@ data = {}
 
 # 循环遍历十个文件
 for i in range(10):
-    filename = f"result_{i}.txt"
+    filename = f"./result/result_{i}.txt"
 
     # 打开文件并解析数据
     with open(filename, "r") as file:

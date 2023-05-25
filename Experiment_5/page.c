@@ -20,7 +20,6 @@ void generateInstructionSequence(int **instructionSequencePtr, int size)
 {
     *instructionSequencePtr = (int *)malloc(sizeof(int) * size);
     int *instructionSequence = *instructionSequencePtr;
-    srand(time(NULL));
     int count;
     for (count = 0; count < size / 4; ++count)
     {
@@ -337,68 +336,12 @@ void replacePage(PageTable *pageTable, int instructionIndex)
     }
 }
 
-void printPageTable(PageTable *pageTable, int *instructionSequence, int size)
-{
-    // 按指令序列读取并打印指令
-    /*打印样式：
-        ===================================================================================================
-        |    count    |    count    |    count    |    count    |    count    |    count    |    count    |
-        | aa bb cc dd | aa bb cc dd | aa bb cc dd | aa bb cc dd | aa bb cc dd | aa bb cc dd | aa bb cc dd |
-        |    addr     |    addr     |    addr     |    addr     |    addr     |    addr     |    addr     |
-        |    data     |    data     |    data     |    data     |    data     |    data     |    data     |
-        ===================================================================================================
-        -count 循环次数
-        -aa bb cc dd 当前页表中的所有页号
-        -addr 逻辑地址
-        -data 逻辑地址对应的数据
-    */
-    const char *divide = "===================================================================================================\n";
-    char pageNumbersStr[128] = "";
-    char countStr[128] = "";
-    char addrStr[128] = "";
-    char dataStr[128] = "";
-    int count = 0;
-    for (int j = 0; j < INSTRUCTIONS_SIZE; ++j, ++count)
-    {
-        sprintf(countStr, "%s|     %3d     ", countStr, j);
-        sprintf(pageNumbersStr, "%s|", pageNumbersStr);
-        int k;
-        for (k = 0; pageTable->pages[k].pageNumber != PAGE_NULL && k < pageTable->pageTableSize; ++k)
-        {
-            sprintf(pageNumbersStr, "%s %2d", pageNumbersStr, pageTable->pages[k].pageNumber);
-        }
-        for (; k < 4; ++k)
-        {
-            sprintf(pageNumbersStr, "%s   ", pageNumbersStr);
-        }
-        sprintf(pageNumbersStr, "%s ", pageNumbersStr);
-        sprintf(addrStr, "%s|     %3d     ", addrStr, instructionSequence[j]);
-        sprintf(dataStr, "%s|     %3d     ", dataStr, readInstruction(pageTable, instructionSequence[j]));
-
-        if (count == 6 || j == INSTRUCTIONS_SIZE - 1)
-        {
-            sprintf(pageNumbersStr, "%s|\n", pageNumbersStr);
-            sprintf(countStr, "%s|\n", countStr);
-            sprintf(addrStr, "%s|\n", addrStr);
-            sprintf(dataStr, "%s|\n", dataStr);
-            printf("%s%s%s%s%s", divide, countStr, pageNumbersStr, addrStr, dataStr);
-
-            sprintf(pageNumbersStr, "");
-            sprintf(countStr, "");
-            sprintf(addrStr, "");
-            sprintf(dataStr, "");
-
-            count = -1;
-        }
-    }
-}
-
 void printPageTableReplacementInfo(PageTable *pageTable)
 {
     // 打印当前策略，页表大小，页大小，命中率，置换率
     printf("当前策略：%s\t页表大小：%d\t页大小：%d\t命中率：%.2f%%\t置换率：%.2f%%\n", pageTable->policy == FIFO ? "FIFO" : pageTable->policy == LRU ? "LRU"
                                                                                                                         : pageTable->policy == LFU   ? "LFU"
-                                                                                                                        : pageTable->policy == CLOCK ? "CLOCK"  
+                                                                                                                        : pageTable->policy == CLOCK ? "CLOCK"
                                                                                                                                                      : "OPT",
            pageTable->pageTableSize, pageTable->pageSize, (double)(INSTRUCTIONS_SIZE - pageTable->page_fault) / (double)INSTRUCTIONS_SIZE * 100, (double)pageTable->page_replacement / (double)INSTRUCTIONS_SIZE * 100);
     // 将结果输出到result.txt文件中
@@ -411,34 +354,40 @@ void printPageTableReplacementInfo(PageTable *pageTable)
 
 int main()
 {
-    fp = fopen("result.txt", "w");
     // 初始化内存
     initMemory();
     // 生成指令序列
     int LogicalAddress = INSTRUCTIONS_SIZE / 10;
     PageTable pageTable;
     initPageTable(&pageTable, PAGE_TABLE_INITIAL_SIZE, PAGE_INITIAL_SIZE);
-    int *instructionSequence;
-    generateInstructionSequence(&instructionSequence, INSTRUCTIONS_SIZE);
-    OPT_instructionSequence = instructionSequence;
-
-    // 测试五个策略
-    for (int k = 0; k < 5; ++k)
+    srand(time(NULL));
+    // 反复测试十次，并且输出之result_0.txt～result_9.txt中
+    for (int file_count = 0; file_count < 10; ++file_count)
     {
-        pageTable.policy = k;
-        // 按指令序列读取并打印指令
-        for (int i = 4; i <= 32; ++i)
+        char *filename = (char *)malloc(sizeof(char) * 30);
+        sprintf(filename, "./result/result_%d.txt", file_count);
+        fp = fopen(filename, "w");
+        int *instructionSequence;
+        generateInstructionSequence(&instructionSequence, INSTRUCTIONS_SIZE);
+        OPT_instructionSequence = instructionSequence;
+        // 测试五个策略
+        for (int k = 0; k < 5; ++k)
         {
-            resizePageTable(&pageTable, i, PAGE_INITIAL_SIZE);
-            for (int j = 0; j < INSTRUCTIONS_SIZE - 1; ++j)
+            pageTable.policy = k;
+            // 按指令序列读取并打印指令
+            for (int i = 4; i <= 32; ++i)
             {
-                outerCount = j;
-                readInstruction(&pageTable, instructionSequence[j]);
+                resizePageTable(&pageTable, i, PAGE_INITIAL_SIZE);
+                for (int j = 0; j < INSTRUCTIONS_SIZE - 1; ++j)
+                {
+                    outerCount = j;
+                    readInstruction(&pageTable, instructionSequence[j]);
+                }
+                printPageTableReplacementInfo(&pageTable);
             }
-            printPageTableReplacementInfo(&pageTable);
         }
+        // 关闭文件
+        fclose(fp);
     }
-    // 关闭文件
-    fclose(fp);
     return 0;
 }

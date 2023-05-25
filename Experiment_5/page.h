@@ -83,7 +83,5 @@ int pageTableLookup(PageTable *pageTable, int instructionIndex);
 void loadPage(PageTable *pageTable, int instructionIndex);
 // 读取指令
 int readInstruction(PageTable *pageTable, int instructionIndex);
-// 读取指令并打印(本函数只在页表大小为4时调用)
-void printPageTable(PageTable *pageTable, int *instructionSequence, int size);
 // 打印本次访问指令序列后的页表置换信息
 void printPageTableReplacementInfo(PageTable *pageTable);
