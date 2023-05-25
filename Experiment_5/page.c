@@ -46,6 +46,10 @@ void initPageTable(PageTable *pageTable, int pageTableSize, int pageSize)
     pageTable->page_replacement = 0;
     pageTable->policy = FIFO;
     pageTable->pageIndex = 0;
+    pageTable->LRUmarks = NULL;
+    pageTable->LFUmarks = NULL;
+    pageTable->CLOCKmarks = NULL;
+    pageTable->OPTmarks = NULL;
     pageTable->pages = (Page *)malloc(sizeof(Page) * pageTableSize);
     for (int i = 0; i < pageTableSize; ++i)
     {
@@ -53,14 +57,46 @@ void initPageTable(PageTable *pageTable, int pageTableSize, int pageSize)
     }
 }
 
-void resizePageTable(PageTable *pageTable, int size)
+void resizePageTable(PageTable *pageTable, int pageTableSize, int pageSize)
 {
     free(pageTable->pages);
-    pageTable->pageTableSize = size;
-    pageTable->pages = (Page *)malloc(sizeof(Page) * size);
-    for (int i = 0; i < size; ++i)
+    // 重置页面置换信息
+    pageTable->page_fault = 0;
+    pageTable->page_hit = 0;
+    pageTable->page_replacement = 0;
+    pageTable->pageTableSize = pageTableSize;
+    pageTable->pageSize = pageSize;
+    switch (pageTable->policy)
     {
-        resizePage(pageTable->pages + i, size);
+    case FIFO:
+        pageTable->pageIndex = 0;
+        break;
+    case LRU:
+        pageTable->LRUmarks == NULL ?: free(pageTable->LRUmarks);
+        pageTable->LRUmarks = (int *)malloc(sizeof(int) * pageTableSize);
+        memset(pageTable->LRUmarks, 0, sizeof(int) * pageTableSize);
+        break;
+    case LFU:
+        pageTable->LFUmarks == NULL ?: free(pageTable->LFUmarks);
+        pageTable->LFUmarks = (int *)malloc(sizeof(int) * pageTableSize);
+        memset(pageTable->LFUmarks, 0, sizeof(int) * pageTableSize);
+        break;
+    case CLOCK:
+        pageTable->CLOCKmarks == NULL ?: free(pageTable->CLOCKmarks);
+        pageTable->CLOCKmarks = (int *)malloc(sizeof(int) * pageTableSize);
+        memset(pageTable->CLOCKmarks, 0, sizeof(int) * pageTableSize);
+        break;
+    case OPT:
+        pageTable->OPTmarks == NULL ?: free(pageTable->OPTmarks);
+        pageTable->OPTmarks = (int *)malloc(sizeof(int) * pageTableSize);
+        memset(pageTable->OPTmarks, 0, sizeof(int) * pageTableSize);
+        break;
+    }
+
+    pageTable->pages = (Page *)malloc(sizeof(Page) * pageTableSize);
+    for (int i = 0; i < pageTableSize; ++i)
+    {
+        resizePage(pageTable->pages + i, pageSize);
     }
 }
 
@@ -72,18 +108,37 @@ void initPage(Page *page, int size)
 
 void resizePage(Page *page, int size)
 {
-    free(page->data);
     page->data = (Instruction *)malloc(sizeof(Instruction) * size);
+    page->pageNumber = PAGE_NULL;
 }
 
 int pageTableLookup(PageTable *pageTable, int instructionIndex)
 {
+    if (pageTable->policy == LRU)
+    {
+        for (int i = 0; pageTable->pages[i].pageNumber != PAGE_NULL && i < pageTable->pageTableSize; ++i)
+        {
+            ++pageTable->LRUmarks[i];
+        }
+    }
     int pageNumber = instructionIndex / pageTable->pageSize;
-    for (int i = 0; i < pageTable->pageTableSize; ++i)
+    for (int i = 0; pageTable->pages[i].pageNumber != PAGE_NULL && i < pageTable->pageTableSize; ++i)
     {
         if (pageTable->pages[i].pageNumber == pageNumber)
         {
             ++pageTable->page_hit;
+            if (pageTable->policy == LRU)
+            {
+                pageTable->LRUmarks[i] = 0;
+            }
+            else if (pageTable->policy == LFU)
+            {
+                ++pageTable->LFUmarks[i];
+            }
+            else if (pageTable->policy == CLOCK)
+            {
+                pageTable->CLOCKmarks[i] = 1;
+            }
             return i;
         }
     }
@@ -104,6 +159,33 @@ void loadPage(PageTable *pageTable, int instructionIndex)
             {
                 pageTable->pages[i].data[j] = externalMemory.data[pageNumber * pageTable->pageSize + j];
             }
+            if (pageTable->policy == LRU)
+            {
+                pageTable->LRUmarks[i] = 0;
+            }
+            else if (pageTable->policy == LFU)
+            {
+                pageTable->LFUmarks[i] = 0;
+            }
+            else if (pageTable->policy == CLOCK)
+            {
+                pageTable->CLOCKmarks[i] = 0;
+            }
+            else if (pageTable->policy == OPT)
+            {
+                // 寻找当前页号的下一次访问时间
+                int nextTime = 0;
+                int j;
+                for (j = outerCount + 1; j < INSTRUCTIONS_SIZE; ++j)
+                {
+                    if (OPT_instructionSequence[j] / pageTable->pageSize == pageTable->pages[i].pageNumber)
+                    {
+                        break;
+                    }
+                }
+                nextTime = j - outerCount;
+                pageTable->OPTmarks[i] = nextTime;
+            }
             return;
         }
     }
@@ -113,20 +195,37 @@ void loadPage(PageTable *pageTable, int instructionIndex)
 
 int readInstruction(PageTable *pageTable, int instructionIndex)
 {
+
     int pageIndex = pageTableLookup(pageTable, instructionIndex);
     if (pageIndex == PAGE_FAULT)
     {
         loadPage(pageTable, instructionIndex);
         pageIndex = pageTableLookup(pageTable, instructionIndex);
     }
-    // // 打印当前页表中的所有页号
-    // int count = 0;
-    // while (pageTable->pages[count].pageNumber != PAGE_NULL && count < pageTable->pageTableSize)
-    // {
-    //     printf("%d ", pageTable->pages[count].pageNumber);
-    //     ++count;
-    // }
-    // printf("\n");
+
+    // 将OPTmarks中的数据更新
+    if (pageTable->policy == OPT)
+    {
+        for (int i = 0; pageTable->pages[i].pageNumber != PAGE_NULL && i < pageTable->pageTableSize; ++i)
+        {
+            if ((--pageTable->OPTmarks[i]) < 0)
+            {
+                // 重新计算其下一次访问时间
+                int nextTime = 0;
+                int j;
+                for (j = outerCount + 1; j < INSTRUCTIONS_SIZE; ++j)
+                {
+                    if (OPT_instructionSequence[j] / pageTable->pageSize == pageTable->pages[i].pageNumber)
+                    {
+                        break;
+                    }
+                }
+                nextTime = j - outerCount;
+                pageTable->OPTmarks[i] = nextTime;
+            }
+        }
+    }
+
     return pageTable->pages[pageIndex].data[instructionIndex % pageTable->pageSize].data;
 }
 
@@ -147,34 +246,107 @@ void replacePage(PageTable *pageTable, int instructionIndex)
         pageTable->pageIndex = (pageTable->pageIndex + 1) % pageTable->pageTableSize;
         break;
     case LRU:
+        // 利用LRUmarks数组来判断最近最久未使用的页面
+        int max = 0;
+        int maxIndex = 0;
+        for (int i = 0; pageTable->pages[i].pageNumber != PAGE_NULL && i < pageTable->pageTableSize; ++i)
+        {
+            if (pageTable->LRUmarks[i] > max)
+            {
+                max = pageTable->LRUmarks[i];
+                maxIndex = i;
+            }
+        }
+        pageTable->pages[maxIndex].pageNumber = instructionIndex / pageTable->pageSize;
+        // 将内存中的数据复制到页表中
+        for (int i = 0; i < pageTable->pageSize; ++i)
+        {
+            pageTable->pages[maxIndex].data[i] = externalMemory.data[pageTable->pages[maxIndex].pageNumber * pageTable->pageSize + i];
+        }
+        pageTable->LRUmarks[maxIndex] = 0;
         break;
-    case LFR:
+    case LFU:
+        // 利用LFUmarks数组来判断最近最少使用的页面
+        int min = 0;
+        int minIndex = 0;
+        for (int i = 0; pageTable->pages[i].pageNumber != PAGE_NULL && i < pageTable->pageTableSize; ++i)
+        {
+            if (pageTable->LFUmarks[i] < min)
+            {
+                min = pageTable->LFUmarks[i];
+                minIndex = i;
+            }
+        }
+        pageTable->pages[minIndex].pageNumber = instructionIndex / pageTable->pageSize;
+        // 将内存中的数据复制到页表中
+        for (int i = 0; i < pageTable->pageSize; ++i)
+        {
+            pageTable->pages[minIndex].data[i] = externalMemory.data[pageTable->pages[minIndex].pageNumber * pageTable->pageSize + i];
+        }
+        pageTable->LFUmarks[minIndex] = 0;
+        break;
+    case CLOCK:
+        // 利用CLOCKmarks数组来判断最近最久未使用的页面
+        while (pageTable->CLOCKmarks[pageTable->pageIndex] == 1)
+        {
+            pageTable->CLOCKmarks[pageTable->pageIndex] = 0;
+            pageTable->pageIndex = (pageTable->pageIndex + 1) % pageTable->pageTableSize;
+        }
+        pageTable->pages[pageTable->pageIndex].pageNumber = instructionIndex / pageTable->pageSize;
+        // 将内存中的数据复制到页表中
+        for (int i = 0; i < pageTable->pageSize; ++i)
+        {
+            pageTable->pages[pageTable->pageIndex].data[i] = externalMemory.data[pageTable->pages[pageTable->pageIndex].pageNumber * pageTable->pageSize + i];
+        }
+        pageTable->CLOCKmarks[pageTable->pageIndex] = 0;
+        pageTable->pageIndex = (pageTable->pageIndex + 1) % pageTable->pageTableSize;
         break;
     case OPT:
+        // 寻找不再会被访问或最长时间内不再被访问的页面
+        int maxTime = 0;
+        int maxTimeIndex = 0;
+        for (int i = 0; pageTable->pages[i].pageNumber != PAGE_NULL && i < pageTable->pageTableSize; ++i)
+        {
+            if (pageTable->OPTmarks[i] > maxTime)
+            {
+                maxTime = pageTable->OPTmarks[i];
+                maxTimeIndex = i;
+            }
+        }
+        pageTable->pages[maxTimeIndex].pageNumber = instructionIndex / pageTable->pageSize;
+        // 将内存中的数据复制到页表中
+        for (int i = 0; i < pageTable->pageSize; ++i)
+        {
+            pageTable->pages[maxTimeIndex].data[i] = externalMemory.data[pageTable->pages[maxTimeIndex].pageNumber * pageTable->pageSize + i];
+        }
+        // 寻找当前页号的下一次访问时间
+        int nextTime;
+        int j;
+        for (j = instructionIndex + 1; j < INSTRUCTIONS_SIZE; ++j)
+        {
+            if (OPT_instructionSequence[j] / pageTable->pageSize == pageTable->pages[maxTimeIndex].pageNumber)
+            {
+                break;
+            }
+        }
+        nextTime = j - outerCount;
+        pageTable->OPTmarks[maxTimeIndex] = nextTime;
         break;
     default:
         break;
     }
 }
 
-int main()
+void printPageTable(PageTable *pageTable, int *instructionSequence, int size)
 {
-    initMemory();
-    // 生成指令序列
-    int LogicalAddress = INSTRUCTIONS_SIZE / 10;
-    PageTable pageTable;
-    initPageTable(&pageTable, PAGE_TABLE_INITIAL_SIZE, PAGE_INITIAL_SIZE);
-    int *instructionSequence;
-    generateInstructionSequence(&instructionSequence, INSTRUCTIONS_SIZE);
-
-    // 按指令序列读取并打印指令320次
+    // 按指令序列读取并打印指令
     /*打印样式：
-        ---------------------------------------------------------------------------------------------------
+        ===================================================================================================
         |    count    |    count    |    count    |    count    |    count    |    count    |    count    |
         | aa bb cc dd | aa bb cc dd | aa bb cc dd | aa bb cc dd | aa bb cc dd | aa bb cc dd | aa bb cc dd |
         |    addr     |    addr     |    addr     |    addr     |    addr     |    addr     |    addr     |
         |    data     |    data     |    data     |    data     |    data     |    data     |    data     |
-        ---------------------------------------------------------------------------------------------------
+        ===================================================================================================
         -count 循环次数
         -aa bb cc dd 当前页表中的所有页号
         -addr 逻辑地址
@@ -191,16 +363,17 @@ int main()
         sprintf(countStr, "%s|     %3d     ", countStr, j);
         sprintf(pageNumbersStr, "%s|", pageNumbersStr);
         int k;
-        for (k = 0; pageTable.pages[k].pageNumber != PAGE_NULL && k < pageTable.pageTableSize; ++k)
+        for (k = 0; pageTable->pages[k].pageNumber != PAGE_NULL && k < pageTable->pageTableSize; ++k)
         {
-            sprintf(pageNumbersStr, "%s %2d", pageNumbersStr, pageTable.pages[k].pageNumber);
+            sprintf(pageNumbersStr, "%s %2d", pageNumbersStr, pageTable->pages[k].pageNumber);
         }
-        for(;k<4;++k){
+        for (; k < 4; ++k)
+        {
             sprintf(pageNumbersStr, "%s   ", pageNumbersStr);
         }
         sprintf(pageNumbersStr, "%s ", pageNumbersStr);
         sprintf(addrStr, "%s|     %3d     ", addrStr, instructionSequence[j]);
-        sprintf(dataStr, "%s|     %3d     ", dataStr, readInstruction(&pageTable, instructionSequence[j]));
+        sprintf(dataStr, "%s|     %3d     ", dataStr, readInstruction(pageTable, instructionSequence[j]));
 
         if (count == 6 || j == INSTRUCTIONS_SIZE - 1)
         {
@@ -218,5 +391,54 @@ int main()
             count = -1;
         }
     }
+}
+
+void printPageTableReplacementInfo(PageTable *pageTable)
+{
+    // 打印当前策略，页表大小，页大小，命中率，置换率
+    printf("当前策略：%s\t页表大小：%d\t页大小：%d\t命中率：%.2f%%\t置换率：%.2f%%\n", pageTable->policy == FIFO ? "FIFO" : pageTable->policy == LRU ? "LRU"
+                                                                                                                        : pageTable->policy == LFU   ? "LFU"
+                                                                                                                        : pageTable->policy == CLOCK ? "CLOCK"  
+                                                                                                                                                     : "OPT",
+           pageTable->pageTableSize, pageTable->pageSize, (double)(INSTRUCTIONS_SIZE - pageTable->page_fault) / (double)INSTRUCTIONS_SIZE * 100, (double)pageTable->page_replacement / (double)INSTRUCTIONS_SIZE * 100);
+    // 将结果输出到result.txt文件中
+    fprintf(fp, "%s %d %.2f%% %.2f%%\n", pageTable->policy == FIFO ? "FIFO" : pageTable->policy == LRU ? "LRU"
+                                                                          : pageTable->policy == LFU   ? "LFU"
+                                                                          : pageTable->policy == CLOCK ? "CLOCK"
+                                                                                                       : "OPT",
+            pageTable->pageTableSize, (double)(INSTRUCTIONS_SIZE - pageTable->page_fault) / (double)INSTRUCTIONS_SIZE * 100, (double)pageTable->page_replacement / (double)INSTRUCTIONS_SIZE * 100);
+}
+
+int main()
+{
+    fp = fopen("result.txt", "w");
+    // 初始化内存
+    initMemory();
+    // 生成指令序列
+    int LogicalAddress = INSTRUCTIONS_SIZE / 10;
+    PageTable pageTable;
+    initPageTable(&pageTable, PAGE_TABLE_INITIAL_SIZE, PAGE_INITIAL_SIZE);
+    int *instructionSequence;
+    generateInstructionSequence(&instructionSequence, INSTRUCTIONS_SIZE);
+    OPT_instructionSequence = instructionSequence;
+
+    // 测试五个策略
+    for (int k = 0; k < 5; ++k)
+    {
+        pageTable.policy = k;
+        // 按指令序列读取并打印指令
+        for (int i = 4; i <= 32; ++i)
+        {
+            resizePageTable(&pageTable, i, PAGE_INITIAL_SIZE);
+            for (int j = 0; j < INSTRUCTIONS_SIZE - 1; ++j)
+            {
+                outerCount = j;
+                readInstruction(&pageTable, instructionSequence[j]);
+            }
+            printPageTableReplacementInfo(&pageTable);
+        }
+    }
+    // 关闭文件
+    fclose(fp);
     return 0;
 }
