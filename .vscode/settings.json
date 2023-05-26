@@ -26,6 +26,8 @@
         "iosfwd": "c",
         "new": "c",
         "sstream": "c",
-        "stop_token": "c"
+        "stop_token": "c",
+        "random": "c",
+        "string.h": "c"
     }
 }
